@@ -19,5 +19,10 @@ export default async function SpeciesList() {
     .select("*, profiles!author(display_name, email)")
     .order("id", { ascending: false });
 
-  return <SpeciesListWithSearch species={species ?? []} sessionId={sessionId} />;
+  const normalized = (species ?? []).map((s) => ({
+    ...s,
+    profiles: Array.isArray(s.profiles) ? s.profiles[0] ?? null : s.profiles ?? null,
+  }));
+
+  return <SpeciesListWithSearch species={normalized} sessionId={sessionId} />;
 }

@@ -190,7 +190,12 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
                     placeholder="Search by scientific or common name..."
                     value={wikiSearchQuery}
                     onChange={(e) => setWikiSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleWikipediaSearch())}
+                    onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleWikipediaSearch();
+                    }
+                  }}
                     disabled={wikiSearching}
                   />
                   <Button
