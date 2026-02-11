@@ -70,7 +70,11 @@ export default function AnimalSpeedGraph() {
 
     const colorScale = scaleOrdinal<string, string>()
       .domain(["herbivore", "omnivore", "carnivore"])
-      .range([DIET_COLORS.herbivore, DIET_COLORS.omnivore, DIET_COLORS.carnivore]);
+      .range([
+        DIET_COLORS.herbivore ?? "#22c55e",
+        DIET_COLORS.omnivore ?? "#eab308",
+        DIET_COLORS.carnivore ?? "#f97316",
+      ]);
 
     g.selectAll(".bar")
       .data(animalData)
