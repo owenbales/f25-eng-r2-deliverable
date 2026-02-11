@@ -12,18 +12,13 @@ import { useState, type BaseSyntheticEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-// Template: https://github.com/shadcn/taxonomy/blob/main/components/user-auth-form.tsx
-
-// Create Zod object schema with validations
 const userAuthSchema = z.object({
   email: z.string().email(),
 });
 
-// Use Zod to extract inferred type from schema
 type FormData = z.infer<typeof userAuthSchema>;
 
 export default function UserAuthForm({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  // Create form with react-hook-form and use Zod schema to validate the form submission (with resolver)
   const {
     register,
     handleSubmit,
@@ -33,14 +28,10 @@ export default function UserAuthForm({ className, ...props }: React.HTMLAttribut
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  // Obtain supabase client from context provider
   const supabaseClient = createBrowserSupabaseClient();
 
   const onSubmit = async (input: FormData) => {
     setIsLoading(true);
-
-    // Supabase magic link sign-in
     const { error } = await supabaseClient.auth.signInWithOtp({
       email: input.email.toLowerCase(),
       options: {
@@ -51,9 +42,12 @@ export default function UserAuthForm({ className, ...props }: React.HTMLAttribut
     setIsLoading(false);
 
     if (error) {
+      const isRateLimit = /rate limit|too many requests/i.test(error.message);
       return toast({
-        title: "Something went wrong.",
-        description: error.message,
+        title: isRateLimit ? "Too many sign-in attempts" : "Something went wrong.",
+        description: isRateLimit
+          ? "Supabase limits how many sign-in emails can be sent. Please wait a few minutes and try again, or use a different email."
+          : error.message,
         variant: "destructive",
       });
     }

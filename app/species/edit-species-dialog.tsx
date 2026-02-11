@@ -1,6 +1,5 @@
 "use client";
 
-import { Icons } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,7 +8,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -17,40 +15,14 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/use-toast";
 import { createBrowserSupabaseClient } from "@/lib/client-utils";
+import type { Database } from "@/lib/schema";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type BaseSyntheticEvent } from "react";
+import { useEffect, type BaseSyntheticEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-const WIKIPEDIA_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary";
-const WIKIPEDIA_OPENSEARCH_URL = "https://en.wikipedia.org/w/api.php";
-
-async function fetchWikipediaSummary(searchQuery: string): Promise<{ extract: string; thumbnailUrl: string | null } | null> {
-  const encodedQuery = encodeURIComponent(searchQuery.trim());
-  const searchRes = await fetch(
-    `${WIKIPEDIA_OPENSEARCH_URL}?action=opensearch&search=${encodedQuery}&limit=1&format=json&origin=*`,
-  );
-  if (!searchRes.ok) return null;
-  const searchJson: unknown = await searchRes.json();
-  const titles = Array.isArray(searchJson) && Array.isArray(searchJson[1]) ? searchJson[1] : [];
-  const title = titles[0];
-  if (!title || typeof title !== "string") return null;
-
-  const summaryTitle = encodeURIComponent(title.replace(/ /g, "_"));
-  const summaryRes = await fetch(`${WIKIPEDIA_SUMMARY_URL}/${summaryTitle}`);
-  if (!summaryRes.ok) return null;
-  const summary = (await summaryRes.json()) as {
-    extract?: string;
-    thumbnail?: { source?: string; uri?: string };
-  };
-  const extract = typeof summary.extract === "string" ? summary.extract : null;
-  if (!extract) return null;
-  const thumbnailUrl =
-    summary.thumbnail?.source ?? summary.thumbnail?.uri ?? null;
-  return { extract, thumbnailUrl };
-}
+type Species = Database["public"]["Tables"]["species"]["Row"];
 
 const kingdoms = z.enum(["Animalia", "Plantae", "Fungi", "Protista", "Archaea", "Bacteria"]);
 
@@ -67,9 +39,7 @@ const speciesSchema = z.object({
   kingdom: kingdoms,
   total_population: z.number().int().positive().min(1).nullable(),
   image: z
-    .string()
-    .url()
-    .nullable()
+    .union([z.string().url(), z.literal("")])
     .transform((val) => (!val || val.trim() === "" ? null : val.trim())),
   description: z
     .string()
@@ -80,21 +50,26 @@ const speciesSchema = z.object({
 
 type FormData = z.infer<typeof speciesSchema>;
 
-const defaultValues: Partial<FormData> = {
-  scientific_name: "",
-  common_name: null,
-  kingdom: "Animalia",
-  total_population: null,
-  image: null,
-  description: null,
-  endangered: null,
-};
-
-export default function AddSpeciesDialog({ userId }: { userId: string }) {
+export default function EditSpeciesDialog({
+  species,
+  open,
+  onOpenChange,
+}: {
+  species: Species;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState<boolean>(false);
-  const [wikiSearchQuery, setWikiSearchQuery] = useState("");
-  const [wikiSearching, setWikiSearching] = useState(false);
+
+  const defaultValues: FormData = {
+    scientific_name: species.scientific_name,
+    common_name: species.common_name ?? null,
+    kingdom: species.kingdom,
+    total_population: species.total_population ?? null,
+    image: species.image ?? null,
+    description: species.description ?? null,
+    endangered: species.endangered ?? null,
+  };
 
   const form = useForm<FormData>({
     resolver: zodResolver(speciesSchema),
@@ -102,11 +77,25 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
     mode: "onChange",
   });
 
+  useEffect(() => {
+    if (open) {
+      form.reset({
+        scientific_name: species.scientific_name,
+        common_name: species.common_name ?? null,
+        kingdom: species.kingdom,
+        total_population: species.total_population ?? null,
+        image: species.image ?? null,
+        description: species.description ?? null,
+        endangered: species.endangered ?? null,
+      });
+    }
+  }, [open, species, form]);
+
   const onSubmit = async (input: FormData) => {
     const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase.from("species").insert([
-      {
-        author: userId,
+    const { error } = await supabase
+      .from("species")
+      .update({
         common_name: input.common_name,
         description: input.description,
         endangered: input.endangered,
@@ -114,8 +103,8 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
         scientific_name: input.scientific_name,
         total_population: input.total_population,
         image: input.image,
-      },
-    ]);
+      })
+      .eq("id", species.id);
 
     if (error) {
       return toast({
@@ -125,89 +114,27 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
       });
     }
 
-    form.reset(defaultValues);
-    setOpen(false);
+    onOpenChange(false);
     router.refresh();
 
     return toast({
-      title: "New species added!",
-      description: "Successfully added " + input.scientific_name + ".",
+      title: "Species updated!",
+      description: "Successfully updated " + input.scientific_name + ".",
     });
   };
 
-  const handleWikipediaSearch = async () => {
-    if (!wikiSearchQuery.trim()) return;
-    setWikiSearching(true);
-    try {
-      const result = await fetchWikipediaSummary(wikiSearchQuery);
-      if (!result) {
-        toast({
-          title: "No article found",
-          description: "No Wikipedia article matched your search. Try a different scientific or common name.",
-          variant: "destructive",
-        });
-        return;
-      }
-      form.setValue("description", result.extract);
-      if (result.thumbnailUrl) form.setValue("image", result.thumbnailUrl);
-      toast({
-        title: "Wikipedia data loaded",
-        description: "Description and image have been filled from Wikipedia.",
-      });
-    } catch {
-      toast({
-        title: "Search failed",
-        description: "Could not reach Wikipedia. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setWikiSearching(false);
-    }
-  };
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="secondary">
-          <Icons.add className="mr-3 h-5 w-5" />
-          Add Species
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-screen overflow-y-auto sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Add Species</DialogTitle>
+          <DialogTitle>Edit Species</DialogTitle>
           <DialogDescription>
-            Add a new species here. Click &quot;Add Species&quot; below when you&apos;re done.
+            Update the species information below. Click &quot;Save&quot; when you&apos;re done.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={(e: BaseSyntheticEvent) => void form.handleSubmit(onSubmit)(e)}>
             <div className="grid w-full items-center gap-4">
-              <div className="space-y-2">
-                <FormLabel>Search Wikipedia for species info</FormLabel>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Search by scientific or common name..."
-                    value={wikiSearchQuery}
-                    onChange={(e) => setWikiSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleWikipediaSearch())}
-                    disabled={wikiSearching}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void handleWikipediaSearch()}
-                    disabled={wikiSearching}
-                  >
-                    {wikiSearching ? (
-                      <Icons.spinner className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                    <span className="ml-2 sr-only sm:not-sr-only">Search Wikipedia</span>
-                  </Button>
-                </div>
-              </div>
               <FormField
                 control={form.control}
                 name="scientific_name"
@@ -277,7 +204,9 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
                           value={value ?? ""}
                           placeholder="300000"
                           {...rest}
-                          onChange={(event) => field.onChange(+event.target.value)}
+                          onChange={(event) =>
+                          field.onChange(event.target.value === "" ? null : Number(event.target.value))
+                        }
                         />
                       </FormControl>
                       <FormMessage />
@@ -296,7 +225,7 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
                       <FormControl>
                         <Input
                           value={value ?? ""}
-                          placeholder="https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/George_the_amazing_guinea_pig.jpg/440px-George_the_amazing_guinea_pig.jpg"
+                          placeholder="https://example.com/image.jpg"
                           {...rest}
                         />
                       </FormControl>
@@ -343,7 +272,7 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
                       <FormControl>
                         <Textarea
                           value={value ?? ""}
-                          placeholder="The guinea pig or domestic guinea pig, also known as the cavy or domestic cavy, is a species of rodent belonging to the genus Cavia in the family Caviidae."
+                          placeholder="Description of the species..."
                           {...rest}
                         />
                       </FormControl>
@@ -354,7 +283,7 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
               />
               <div className="flex">
                 <Button type="submit" className="ml-1 mr-1 flex-auto">
-                  Add Species
+                  Save
                 </Button>
                 <DialogClose asChild>
                   <Button type="button" className="ml-1 mr-1 flex-auto" variant="secondary">
