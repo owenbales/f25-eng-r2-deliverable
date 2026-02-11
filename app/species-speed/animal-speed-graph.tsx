@@ -140,7 +140,7 @@ export default function AnimalSpeedGraph() {
         .append("rect")
         .attr("width", 14)
         .attr("height", 14)
-        .attr("fill", DIET_COLORS[dietKey]);
+        .attr("fill", DIET_COLORS[dietKey] ?? "#888");
       legendRow
         .append("text")
         .attr("x", 20)
